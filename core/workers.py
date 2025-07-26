@@ -52,9 +52,10 @@ class AutoTyperWorker(QObject):
         self.hotkey_display_name = hotkey_display_name
         self.keyboard_controller = PynputController()
         self._is_running_request = True
+    
     @Slot()
     def run(self):
-        error_emitted = False # Flag theo doi loi
+        error_emitted = False
         try:
             if not self.text_to_type:
                 self.error_signal.emit(Translations.get("worker_empty_text_error"))
@@ -66,57 +67,82 @@ class AutoTyperWorker(QObject):
                 self.error_signal.emit(Translations.get("worker_invalid_repetitions_error"))
                 error_emitted = True; return
 
-            count = 0; initial_delay = 0.75; start_time = time.perf_counter()
+            # === START OF REPLACEMENT ===
+            # Tai cau truc toan bo logic de giong voi RecordedPlayerWorker
+            # Buoc 1: Chuyen doi van ban dau vao thanh mot danh sach cac su kien (press, release)
+            events_to_perform = []
+            special_keys_map = {
+                "<enter>": PynputKey.enter, "<tab>": PynputKey.tab, "<esc>": PynputKey.esc,
+                "<space>": PynputKey.space, "<up>": PynputKey.up, "<down>": PynputKey.down,
+                "<left>": PynputKey.left, "<right>": PynputKey.right,
+                **{f"<f{i}>": getattr(PynputKey, f"f{i}") for i in range(1, 13)},
+            }
+
+            if self.text_to_type.lower() in special_keys_map:
+                key_obj = special_keys_map[self.text_to_type.lower()]
+                events_to_perform.append(("press", key_obj))
+                events_to_perform.append(("release", key_obj))
+            else:
+                for char in self.text_to_type:
+                    try:
+                        # Chuyen doi moi ky tu thanh KeyCode, tao ca su kien press va release
+                        key_obj = KeyCode.from_char(char)
+                        events_to_perform.append(("press", key_obj))
+                        events_to_perform.append(("release", key_obj))
+                    except Exception:
+                        # Fallback neu ky tu khong the chuyen doi, mac du hiem khi xay ra
+                        # Thay vi dung .type(), ta van mo phong press/release voi ky tu string
+                        events_to_perform.append(("press", char))
+                        events_to_perform.append(("release", char))
+
+            # Buoc 2: Thuc thi vong lap chinh, giong nhu RecordedPlayerWorker
+            count = 0
+            initial_delay = 0.75
+            start_time = time.perf_counter()
             while time.perf_counter() - start_time < initial_delay:
-                if not self._is_running_request:
-                    return 
+                if not self._is_running_request: return
                 time.sleep(0.05)
 
             while self._is_running_request:
                 if self.repetitions != 0 and count >= self.repetitions: break
-                special_keys_map = {
-                    "<enter>": PynputKey.enter, "<tab>": PynputKey.tab, "<esc>": PynputKey.esc,
-                    "<space>": PynputKey.space, "<up>": PynputKey.up, "<down>": PynputKey.down,
-                    "<left>": PynputKey.left, "<right>": PynputKey.right,
-                    **{f"<f{i}>": getattr(PynputKey, f"f{i}") for i in range(1, 13)},
-                }
-
                 if not self._is_running_request: break
 
-                if self.text_to_type.lower() in special_keys_map:
-                    key_to_press = special_keys_map[self.text_to_type.lower()]
-                    self.keyboard_controller.press(key_to_press)
-                    time.sleep(0.03) 
-                    self.keyboard_controller.release(key_to_press)
-       
-                else:
-                    for char in self.text_to_type:
-                        if not self._is_running_request:
-                            break
-                        self.keyboard_controller.press(char)
-                        time.sleep(0.03) 
-                        self.keyboard_controller.release(char)
-                        time.sleep(0.02) 
-                
+                # Thuc thi chuoi su kien da tao
+                for action, key_object in events_to_perform:
+                    if not self._is_running_request: break
+                    
+                    if action == "press":
+                        self.keyboard_controller.press(key_object)
+                    elif action == "release":
+                        self.keyboard_controller.release(key_object)
+
+                    # Them mot do tre nho giua moi hanh dong (press/release) de mo phong that hon
+                    time.sleep(0.025)
+
                 if not self._is_running_request: break
 
                 count += 1
                 rep_text = f"{self.repetitions}" if self.repetitions != 0 else Translations.get("rep_text_infinite")
-
                 self.update_status_signal.emit(Translations.get("worker_status_running",
                     count=count, rep_text=rep_text, hotkey_display_name=self.hotkey_display_name
                 ))
-                sleep_start_time=time.perf_counter()
-                while time.perf_counter()-sleep_start_time < self.interval_s:
-                    if not self._is_running_request:break
+                
+                # Sleep cho khoang thoi gian chinh (interval)
+                sleep_start_time = time.perf_counter()
+                while time.perf_counter() - sleep_start_time < self.interval_s:
+                    if not self._is_running_request: break
                     time.sleep(0.05)
-                if not self._is_running_request:break
+                
+                if not self._is_running_request: break
+            # === END OF REPLACEMENT ===
+
         except Exception as e:
             self.error_signal.emit(Translations.get("worker_runtime_error", error_message=str(e)))
             error_emitted = True
         finally:
             if not error_emitted:
                 self.typing_finished_signal.emit()
+
     @Slot()
     def request_stop(self): self._is_running_request=False
 
