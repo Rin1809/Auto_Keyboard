@@ -69,16 +69,40 @@ class AutoTyperWorker(QObject):
             count = 0; initial_delay = 0.75; start_time = time.perf_counter()
             while time.perf_counter() - start_time < initial_delay:
                 if not self._is_running_request:
-                    return # Finally se emit typing_finished_signal
+                    return 
                 time.sleep(0.05)
 
             while self._is_running_request:
                 if self.repetitions != 0 and count >= self.repetitions: break
-                special_keys_map = {"<enter>":PynputKey.enter,"<tab>":PynputKey.tab,"<esc>":PynputKey.esc,"<space>":PynputKey.space,"<up>":PynputKey.up,"<down>":PynputKey.down,"<left>":PynputKey.left,"<right>":PynputKey.right,**{f"<f{i}>":getattr(PynputKey,f"f{i}")for i in range(1,13)},}
+                special_keys_map = {
+                    "<enter>": PynputKey.enter, "<tab>": PynputKey.tab, "<esc>": PynputKey.esc,
+                    "<space>": PynputKey.space, "<up>": PynputKey.up, "<down>": PynputKey.down,
+                    "<left>": PynputKey.left, "<right>": PynputKey.right,
+                    **{f"<f{i}>": getattr(PynputKey, f"f{i}") for i in range(1, 13)},
+                }
+
+                if not self._is_running_request: break
+
                 if self.text_to_type.lower() in special_keys_map:
-                    key_to_press=special_keys_map[self.text_to_type.lower()]; self.keyboard_controller.press(key_to_press); self.keyboard_controller.release(key_to_press)
-                else: self.keyboard_controller.type(self.text_to_type)
-                count+=1; rep_text=f"{self.repetitions}"if self.repetitions!=0 else Translations.get("rep_text_infinite")
+                    key_to_press = special_keys_map[self.text_to_type.lower()]
+                    self.keyboard_controller.press(key_to_press)
+                    time.sleep(0.03) 
+                    self.keyboard_controller.release(key_to_press)
+       
+                else:
+                    for char in self.text_to_type:
+                        if not self._is_running_request:
+                            break
+                        self.keyboard_controller.press(char)
+                        time.sleep(0.03) 
+                        self.keyboard_controller.release(char)
+                        time.sleep(0.02) 
+                
+                if not self._is_running_request: break
+
+                count += 1
+                rep_text = f"{self.repetitions}" if self.repetitions != 0 else Translations.get("rep_text_infinite")
+
                 self.update_status_signal.emit(Translations.get("worker_status_running",
                     count=count, rep_text=rep_text, hotkey_display_name=self.hotkey_display_name
                 ))
@@ -366,7 +390,8 @@ class RecordedPlayerWorker(QObject):
                         target_sleep_s = delay_ms / 1000.0
                         while time.perf_counter() - sleep_start_time < target_sleep_s:
                             if not self._is_running_request: break
-                            time.sleep(min(0.01, target_sleep_s - (time.perf_counter() - sleep_start_time) ))
+                            remaining_sleep_s = target_sleep_s - (time.perf_counter() - sleep_start_time)
+                            time.sleep(max(0, min(0.01, remaining_sleep_s)))
                     if not self._is_running_request: break
 
                     if action_canonical == "press":

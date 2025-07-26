@@ -1,3 +1,4 @@
 PySide6
 pynput
 wheel
+pywin32
